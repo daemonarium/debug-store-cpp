@@ -20,15 +20,21 @@ namespace waos {
       register_rpc(server, spansEv, register_type);
       waos::debug_metrics_event metricsEv;
       register_rpc(server, metricsEv, register_type);
+      waos::debug_bindings_event bindingsEv;
+      register_rpc(server, bindingsEv, register_type);
+      waos::debug_registry_event registryEv;
+      register_rpc(server, registryEv, register_type);
 
       #ifdef RPC_SERVER
       if(server) {
-        // Wire indices after register_basic_types: 0..2 = rpc_*, then these five.
+        // Wire indices after register_basic_types: 0..2 = rpc_*, then these seven.
         server->register_message_type<waos::debug_snapshot_event>();
         server->register_message_type<waos::debug_io_event>();
         server->register_message_type<waos::debug_logs_event>();
         server->register_message_type<waos::debug_spans_event>();
         server->register_message_type<waos::debug_metrics_event>();
+        server->register_message_type<waos::debug_bindings_event>();
+        server->register_message_type<waos::debug_registry_event>();
       }
       #endif
     }

@@ -153,6 +153,21 @@ namespace waos {
       }
       self->track(self->append_payload(self->metrics_file_, "metrics.bin", std::move(payload)));
     });
+    rpc_server_->on_message<debug_bindings_event>([self](debug_bindings_event&, size_t payload_size) {
+      auto payload = self->read_payload(payload_size);
+      if(self->status_ != session_status::OPEN) {
+        return;
+      }
+      self->track(self->write_file_truncate("bindings.json", std::move(payload)));
+    });
+    rpc_server_->on_message<debug_registry_event>([self](debug_registry_event& ev, size_t payload_size) {
+      auto payload = self->read_payload(payload_size);
+      if(self->status_ != session_status::OPEN) {
+        return;
+      }
+      std::string filename = "registry." + std::to_string(ev.process_id) + "." + std::to_string(ev.socket_id) + ".bin";
+      self->track(self->write_file_truncate(std::move(filename), std::move(payload)));
+    });
   }
 
   std::vector<std::uint8_t> session::read_payload(size_t payload_size) {
@@ -243,6 +258,37 @@ namespace waos {
       ));
     }
     co_await fs_client::fs_rpc->write(static_cast<std::uint32_t>(file_id), data);
+    co_return;
+  }
+
+  std::shared_ptr<serialization::promise<void>> session::write_file_truncate(
+      std::string filename,
+      std::vector<std::uint8_t> data
+  ) {
+    // Serialize truncating writes so back-to-back registry overwrites cannot interleave open(TRUNCATE).
+    auto prev = truncate_chain_;
+    auto op = write_file_truncate_after(prev, std::move(filename), std::move(data));
+    truncate_chain_ = op;
+    return op;
+  }
+
+  std::shared_ptr<serialization::promise<void>> session::write_file_truncate_after(
+      std::shared_ptr<serialization::promise<void>> prev,
+      std::string filename,
+      std::vector<std::uint8_t> data
+  ) {
+    if(prev) {
+      co_await prev;
+    }
+    auto file_id = co_await fs_client::fs_rpc->open(
+      dir_path_ + "/" + filename,
+      FS_CREATE | FS_WRITE | FS_TRUNCATE
+    );
+    if(!data.empty()) {
+      co_await fs_client::fs_rpc->write(file_id, data);
+    }
+    co_await fs_client::fs_rpc->sync(file_id);
+    co_await fs_client::fs_rpc->close(file_id);
     co_return;
   }
 

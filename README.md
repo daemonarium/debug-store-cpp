@@ -32,10 +32,10 @@ Recorder opens a local socket and **binds itself** to `store_socket` (no `writer
 
 On the session socket:
 
-- Messages (+ trailing payload): `debug_snapshot_event`, `debug_io_event`, `debug_logs_event`, `debug_spans_event`, `debug_metrics_event`
+- Messages (+ trailing payload): `debug_snapshot_event`, `debug_io_event`, `debug_logs_event`, `debug_spans_event`, `debug_metrics_event`, `debug_bindings_event`, `debug_registry_event`
 - RPC `debug_session`: `set_labels`, `sync`, `seal`, `fail`
 
-One writer; no read/tooling API; backpressure = sockets. Labels are `map<string,string>`. Log/span/metric payloads are opaque bytes.
+One writer; no read/tooling API; backpressure = sockets. Labels are `map<string,string>`. Log/span/metric payloads are opaque bytes. Topology: bindings payload → `bindings.json`; registry event `{ process_id, socket_id }` + payload → `registry.<pid>.<sock>.bin` (truncate overwrite).
 
 ## On-disk layout (under ts-fs `rootDir`)
 
@@ -44,6 +44,8 @@ sessions/<session_id>/meta.json
 sessions/<session_id>/snap.<uid>.bin
 sessions/<session_id>/snap.<uid>.meta.json
 sessions/<session_id>/io.bin|logs.bin|spans.bin|metrics.bin
+sessions/<session_id>/bindings.json
+sessions/<session_id>/registry.<pid>.<sock>.bin
 ```
 
 ## Build

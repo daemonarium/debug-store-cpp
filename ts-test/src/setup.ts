@@ -38,6 +38,8 @@ export const DEBUG_MESSAGE_TYPES = [
   'debug_logs_event',
   'debug_spans_event',
   'debug_metrics_event',
+  'debug_bindings_event',
+  'debug_registry_event',
 ] as const
 
 export interface TestContext {

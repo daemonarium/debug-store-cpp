@@ -89,6 +89,54 @@ describe('debug-store WASM', () => {
     })
   })
 
+  it('writes bindings.json and registry files from topology messages', async () => {
+    await withTempRoot(async (root) => {
+      const ctx = await setupTestEnvironment(root)
+      try {
+        const begin = await ctx.userClient.call(ctx.methodId('begin'), {
+          name: 'topology',
+          process_id: 3n,
+          labels: {},
+        }) as Record<string, unknown>
+
+        const sessionId = num(begin.session_id)
+        const session = await openSessionChannel(ctx, num(begin.store_socket))
+
+        const bindingsPayload = new TextEncoder().encode(
+          JSON.stringify([{ socket: 0, peer_process: 5, peer_socket: 0, direction: 3 }])
+        )
+        session.sendPayload('debug_bindings_event', { reserved: 0 }, bindingsPayload)
+
+        const registryPayload = new Uint8Array([0xde, 0xad, 0xbe, 0xef])
+        session.sendPayload('debug_registry_event', {
+          process_id: 3n,
+          socket_id: 0,
+        }, registryPayload)
+
+        const overwrittenRegistry = new Uint8Array([0xca, 0xfe])
+        session.sendPayload('debug_registry_event', {
+          process_id: 3n,
+          socket_id: 0,
+        }, overwrittenRegistry)
+
+        const emptyRegistry = new Uint8Array(0)
+        session.sendPayload('debug_registry_event', {
+          process_id: 5n,
+          socket_id: 1,
+        }, emptyRegistry)
+
+        await session.client.call(session.methodId('sync'))
+
+        const dir = join(root, 'sessions', String(sessionId))
+        expect(Buffer.from(await fsp.readFile(join(dir, 'bindings.json'))).equals(Buffer.from(bindingsPayload))).to.equal(true)
+        expect(Buffer.from(await fsp.readFile(join(dir, 'registry.3.0.bin'))).equals(Buffer.from(overwrittenRegistry))).to.equal(true)
+        expect((await fsp.readFile(join(dir, 'registry.5.1.bin'))).byteLength).to.equal(0)
+      } finally {
+        await ctx.cleanup()
+      }
+    })
+  })
+
   it('double seal raises debug_conflict', async () => {
     await withTempRoot(async (root) => {
       const ctx = await setupTestEnvironment(root)
