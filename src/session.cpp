@@ -5,6 +5,8 @@
 
 #include <socket/socket.h>
 #include <utils/socket_handlers.hpp>
+#include <serialization/serialize.hpp>
+#include <serialization/stream_writer.hpp>
 #include <sstream>
 #include <unordered_map>
 #include <algorithm>
@@ -25,22 +27,6 @@ namespace waos {
     std::uint64_t next_session_id = 1;
     std::uint32_t next_session_socket = static_cast<std::uint32_t>(base_socket_id::FIRST_SESSION);
 
-    std::string escape_json(const std::string& s) {
-      std::string out;
-      out.reserve(s.size() + 8);
-      for(char c : s) {
-        if(c == '\\' || c == '"') {
-          out.push_back('\\');
-          out.push_back(c);
-        } else if(c == '\n') {
-          out += "\\n";
-        } else {
-          out.push_back(c);
-        }
-      }
-      return out;
-    }
-
     std::string status_string(session_status status) {
       switch(status) {
         case session_status::OPEN: return "open";
@@ -48,6 +34,16 @@ namespace waos {
         case session_status::FAILED: return "failed";
       }
       return "open";
+    }
+
+    template <typename T>
+    std::vector<std::uint8_t> serialize_to_bytes(const T& value) {
+      std::ostringstream oss;
+      serialization::stream_writer writer(oss);
+      serialize(writer, value);
+      writer.write_rest();
+      std::string s = oss.str();
+      return std::vector<std::uint8_t>(s.begin(), s.end());
     }
 
   }
@@ -69,8 +65,8 @@ namespace waos {
     std::uint32_t socket_id = next_session_socket++;
 
     struct socket_options socket_options = {
-      .input_buffer_size = 2 * 1024 * 1024,
-      .output_buffer_size = 2 * 1024 * 1024,
+      .input_buffer_size = 8 * 1024 * 1024,
+      .output_buffer_size = 8 * 1024 * 1024,
       .flush_threshold = 4096,
       .data_event_threshold = 0,
       .drain_event_threshold = 4,
@@ -158,7 +154,7 @@ namespace waos {
       if(self->status_ != session_status::OPEN) {
         return;
       }
-      self->track(self->write_file_truncate("bindings.json", std::move(payload)));
+      self->track(self->write_file_truncate("bindings.bin", std::move(payload)));
     });
     rpc_server_->on_message<debug_registry_event>([self](debug_registry_event& ev, size_t payload_size) {
       auto payload = self->read_payload(payload_size);
@@ -167,6 +163,13 @@ namespace waos {
       }
       std::string filename = "registry." + std::to_string(ev.process_id) + "." + std::to_string(ev.socket_id) + ".bin";
       self->track(self->write_file_truncate(std::move(filename), std::move(payload)));
+    });
+    rpc_server_->on_message<debug_code_event>([self](debug_code_event&, size_t payload_size) {
+      auto payload = self->read_payload(payload_size);
+      if(self->status_ != session_status::OPEN) {
+        return;
+      }
+      self->track(self->append_code(std::move(payload)));
     });
   }
 
@@ -194,24 +197,17 @@ namespace waos {
   }
 
   std::shared_ptr<serialization::promise<void>> session::write_meta() {
-    std::ostringstream json;
-    json << "{\"name\":\"" << escape_json(name_) << "\","
-         << "\"process_id\":" << process_id_ << ","
-         << "\"status\":\"" << status_string(status_) << "\","
-         << "\"error\":\"" << escape_json(error_) << "\","
-         << "\"labels\":{";
-    bool first = true;
-    for(const auto& [k, v] : labels_) {
-      if(!first) json << ",";
-      first = false;
-      json << "\"" << escape_json(k) << "\":\"" << escape_json(v) << "\"";
-    }
-    json << "}}";
-    std::string body = json.str();
-    std::vector<std::uint8_t> bytes(body.begin(), body.end());
+    session_meta meta{
+      .name = name_,
+      .process_id = process_id_,
+      .status = status_string(status_),
+      .error = error_,
+      .labels = labels_,
+    };
+    auto bytes = serialize_to_bytes(meta);
 
     auto file_id = co_await fs_client::fs_rpc->open(
-      dir_path_ + "/meta.json",
+      dir_path_ + "/meta.bin",
       FS_CREATE | FS_WRITE | FS_TRUNCATE
     );
     co_await fs_client::fs_rpc->write(file_id, bytes);
@@ -239,6 +235,7 @@ namespace waos {
     co_await sync_one(logs_file_);
     co_await sync_one(spans_file_);
     co_await sync_one(metrics_file_);
+    co_await sync_one(code_file_);
     co_return;
   }
 
@@ -258,6 +255,33 @@ namespace waos {
       ));
     }
     co_await fs_client::fs_rpc->write(static_cast<std::uint32_t>(file_id), data);
+    co_return;
+  }
+
+  std::shared_ptr<serialization::promise<void>> session::append_code(std::vector<std::uint8_t> data) {
+    auto prev = code_chain_;
+    auto op = append_code_after(prev, std::move(data));
+    code_chain_ = op;
+    return op;
+  }
+
+  std::shared_ptr<serialization::promise<void>> session::append_code_after(
+      std::shared_ptr<serialization::promise<void>> prev,
+      std::vector<std::uint8_t> data
+  ) {
+    if(prev) {
+      co_await prev;
+    }
+    // First chunk opens with TRUNCATE; later chunks append on the kept handle.
+    if(code_file_ < 0) {
+      code_file_ = static_cast<std::int64_t>(co_await fs_client::fs_rpc->open(
+        dir_path_ + "/code.wasm",
+        FS_CREATE | FS_WRITE | FS_TRUNCATE
+      ));
+    }
+    if(!data.empty()) {
+      co_await fs_client::fs_rpc->write(static_cast<std::uint32_t>(code_file_), data);
+    }
     co_return;
   }
 
@@ -297,7 +321,7 @@ namespace waos {
       std::vector<std::uint8_t> payload
   ) {
     std::string snap_path = dir_path_ + "/snap." + std::to_string(ev.snapshot_uid) + ".bin";
-    std::string meta_path = dir_path_ + "/snap." + std::to_string(ev.snapshot_uid) + ".meta.json";
+    std::string meta_path = dir_path_ + "/snap." + std::to_string(ev.snapshot_uid) + ".meta.bin";
 
     auto file_id = co_await fs_client::fs_rpc->open(snap_path, FS_CREATE | FS_WRITE | FS_TRUNCATE);
     if(!payload.empty()) {
@@ -306,13 +330,13 @@ namespace waos {
     co_await fs_client::fs_rpc->sync(file_id);
     co_await fs_client::fs_rpc->close(file_id);
 
-    std::ostringstream meta;
-    meta << "{\"snapshot_uid\":" << ev.snapshot_uid
-         << ",\"mana_used\":" << ev.mana_used
-         << ",\"mana_limit\":" << ev.mana_limit
-         << ",\"memory_size\":" << payload.size() << "}";
-    std::string body = meta.str();
-    std::vector<std::uint8_t> bytes(body.begin(), body.end());
+    snapshot_meta meta{
+      .snapshot_uid = ev.snapshot_uid,
+      .mana_used = ev.mana_used,
+      .mana_limit = ev.mana_limit,
+      .memory_size = payload.size(),
+    };
+    auto bytes = serialize_to_bytes(meta);
     auto meta_id = co_await fs_client::fs_rpc->open(meta_path, FS_CREATE | FS_WRITE | FS_TRUNCATE);
     co_await fs_client::fs_rpc->write(meta_id, bytes);
     co_await fs_client::fs_rpc->sync(meta_id);
@@ -375,6 +399,7 @@ namespace waos {
     co_await close_one(logs_file_);
     co_await close_one(spans_file_);
     co_await close_one(metrics_file_);
+    co_await close_one(code_file_);
     co_return;
   }
 

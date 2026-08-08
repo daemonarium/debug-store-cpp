@@ -6,6 +6,7 @@ import {
   openSessionChannel,
   setupTestEnvironment,
   withTempRoot,
+  deserializeTypedBytes,
 } from './setup.js'
 
 function num(v: unknown): number {
@@ -28,12 +29,17 @@ describe('debug-store WASM', () => {
         expect(num(result.store_process)).to.equal(ctx.storeProcessId)
         expect(num(result.store_socket)).to.be.at.least(2)
 
-        const metaPath = join(root, 'sessions', '1', 'meta.json')
-        const meta = JSON.parse(await fsp.readFile(metaPath, 'utf8'))
+        const session = await openSessionChannel(ctx, num(result.store_socket))
+        const metaPath = join(root, 'sessions', '1', 'meta.bin')
+        const meta = deserializeTypedBytes(
+          session.registry,
+          'session_meta',
+          await fsp.readFile(metaPath)
+        )
         expect(meta.name).to.equal('unit-begin')
-        expect(meta.process_id).to.equal(42)
+        expect(num(meta.process_id)).to.equal(42)
         expect(meta.status).to.equal('open')
-        expect(meta.labels.env).to.equal('test')
+        expect((meta.labels as Record<string, string>).env).to.equal('test')
       } finally {
         await ctx.cleanup()
       }
@@ -74,14 +80,22 @@ describe('debug-store WASM', () => {
         const snap = await fsp.readFile(join(dir, 'snap.99.bin'))
         expect(Buffer.from(snap).equals(Buffer.from(snapPayload))).to.equal(true)
 
-        const snapMeta = JSON.parse(await fsp.readFile(join(dir, 'snap.99.meta.json'), 'utf8'))
-        expect(snapMeta.snapshot_uid).to.equal(99)
-        expect(snapMeta.memory_size).to.equal(snapPayload.length)
+        const snapMeta = deserializeTypedBytes(
+          session.registry,
+          'snapshot_meta',
+          await fsp.readFile(join(dir, 'snap.99.meta.bin'))
+        )
+        expect(num(snapMeta.snapshot_uid)).to.equal(99)
+        expect(num(snapMeta.memory_size)).to.equal(snapPayload.length)
 
         expect(Buffer.from(await fsp.readFile(join(dir, 'io.bin'))).equals(Buffer.from(ioPayload))).to.equal(true)
         expect(Buffer.from(await fsp.readFile(join(dir, 'logs.bin'))).equals(Buffer.from(logsPayload))).to.equal(true)
 
-        const meta = JSON.parse(await fsp.readFile(join(dir, 'meta.json'), 'utf8'))
+        const meta = deserializeTypedBytes(
+          session.registry,
+          'session_meta',
+          await fsp.readFile(join(dir, 'meta.bin'))
+        )
         expect(meta.status).to.equal('sealed')
       } finally {
         await ctx.cleanup()
@@ -89,7 +103,7 @@ describe('debug-store WASM', () => {
     })
   })
 
-  it('writes bindings.json and registry files from topology messages', async () => {
+  it('writes bindings.bin, registry files, and code.wasm from messages', async () => {
     await withTempRoot(async (root) => {
       const ctx = await setupTestEnvironment(root)
       try {
@@ -102,9 +116,7 @@ describe('debug-store WASM', () => {
         const sessionId = num(begin.session_id)
         const session = await openSessionChannel(ctx, num(begin.store_socket))
 
-        const bindingsPayload = new TextEncoder().encode(
-          JSON.stringify([{ socket: 0, peer_process: 5, peer_socket: 0, direction: 3 }])
-        )
+        const bindingsPayload = new TextEncoder().encode('opaque-bindings')
         session.sendPayload('debug_bindings_event', { reserved: 0 }, bindingsPayload)
 
         const registryPayload = new Uint8Array([0xde, 0xad, 0xbe, 0xef])
@@ -125,12 +137,16 @@ describe('debug-store WASM', () => {
           socket_id: 1,
         }, emptyRegistry)
 
+        const codePayload = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01])
+        session.sendPayload('debug_code_event', { reserved: 0 }, codePayload)
+
         await session.client.call(session.methodId('sync'))
 
         const dir = join(root, 'sessions', String(sessionId))
-        expect(Buffer.from(await fsp.readFile(join(dir, 'bindings.json'))).equals(Buffer.from(bindingsPayload))).to.equal(true)
+        expect(Buffer.from(await fsp.readFile(join(dir, 'bindings.bin'))).equals(Buffer.from(bindingsPayload))).to.equal(true)
         expect(Buffer.from(await fsp.readFile(join(dir, 'registry.3.0.bin'))).equals(Buffer.from(overwrittenRegistry))).to.equal(true)
         expect((await fsp.readFile(join(dir, 'registry.5.1.bin'))).byteLength).to.equal(0)
+        expect(Buffer.from(await fsp.readFile(join(dir, 'code.wasm'))).equals(Buffer.from(codePayload))).to.equal(true)
       } finally {
         await ctx.cleanup()
       }

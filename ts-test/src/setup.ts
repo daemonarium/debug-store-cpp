@@ -11,7 +11,10 @@ import {
   registerDynamicCodecs,
   deserializeTypeRegistry,
   deserializeValueByType,
+  deserializeTypedJson,
   ensureRpcCodecs,
+  LocalCircularBuffer,
+  LocalCircularBufferReader,
   TypeKind,
   type TypeRegistry,
   type SocketOptions,
@@ -40,6 +43,7 @@ export const DEBUG_MESSAGE_TYPES = [
   'debug_metrics_event',
   'debug_bindings_event',
   'debug_registry_event',
+  'debug_code_event',
 ] as const
 
 export interface TestContext {
@@ -214,4 +218,18 @@ export async function openSessionChannel(
   }
 
   return { socket, client, registry, methodId, sendPayload }
+}
+
+export function deserializeTypedBytes(
+  registry: TypeRegistry,
+  typeName: string,
+  bytes: Uint8Array
+): Record<string, unknown> {
+  const codecs = new CodecRegistry()
+  registerDynamicCodecs(codecs, registry)
+  ensureRpcCodecs(codecs, registry)
+  const buffer = new LocalCircularBuffer(Math.max(bytes.length + 256, 1024))
+  buffer.write(bytes, bytes.length)
+  const reader = new LocalCircularBufferReader(buffer, codecs)
+  return deserializeTypedJson(reader, registry, typeName) as Record<string, unknown>
 }

@@ -24,10 +24,18 @@ namespace waos {
       register_rpc(server, bindingsEv, register_type);
       waos::debug_registry_event registryEv;
       register_rpc(server, registryEv, register_type);
+      waos::debug_code_event codeEv;
+      register_rpc(server, codeEv, register_type);
+      waos::session_meta sessionMeta;
+      register_rpc(server, sessionMeta, register_type);
+      waos::snapshot_meta snapshotMeta;
+      register_rpc(server, snapshotMeta, register_type);
+      waos::bindings_snapshot bindingsSnap;
+      register_rpc(server, bindingsSnap, register_type);
 
       #ifdef RPC_SERVER
       if(server) {
-        // Wire indices after register_basic_types: 0..2 = rpc_*, then these seven.
+        // Wire indices after register_basic_types: 0..2 = rpc_*, then these messages.
         server->register_message_type<waos::debug_snapshot_event>();
         server->register_message_type<waos::debug_io_event>();
         server->register_message_type<waos::debug_logs_event>();
@@ -35,6 +43,7 @@ namespace waos {
         server->register_message_type<waos::debug_metrics_event>();
         server->register_message_type<waos::debug_bindings_event>();
         server->register_message_type<waos::debug_registry_event>();
+        server->register_message_type<waos::debug_code_event>();
       }
       #endif
     }

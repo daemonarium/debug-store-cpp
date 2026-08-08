@@ -58,7 +58,9 @@ namespace waos {
       std::int64_t logs_file_ = -1;
       std::int64_t spans_file_ = -1;
       std::int64_t metrics_file_ = -1;
+      std::int64_t code_file_ = -1;
       std::shared_ptr<serialization::promise<void>> truncate_chain_;
+      std::shared_ptr<serialization::promise<void>> code_chain_;
 
       void ensure_open();
       void track(std::shared_ptr<serialization::promise<void>> p);
@@ -67,6 +69,11 @@ namespace waos {
       std::shared_ptr<serialization::promise<void>> close_open_files();
       std::shared_ptr<serialization::promise<void>> write_meta();
       std::shared_ptr<serialization::promise<void>> append_payload(std::int64_t& file_id, std::string filename, std::vector<std::uint8_t> data);
+      std::shared_ptr<serialization::promise<void>> append_code(std::vector<std::uint8_t> data);
+      std::shared_ptr<serialization::promise<void>> append_code_after(
+        std::shared_ptr<serialization::promise<void>> prev,
+        std::vector<std::uint8_t> data
+      );
       std::shared_ptr<serialization::promise<void>> write_file_truncate(std::string filename, std::vector<std::uint8_t> data);
       std::shared_ptr<serialization::promise<void>> write_file_truncate_after(
         std::shared_ptr<serialization::promise<void>> prev,
