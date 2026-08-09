@@ -39,7 +39,7 @@ namespace waos {
       std::shared_ptr<serialization::promise<void>> fail(std::string error);
 
       std::shared_ptr<serialization::promise<void>> initialize_storage();
-      serialization::socket_rpc_server* rpc_server() { return rpc_server_.get(); }
+      serialization::compressed_socket_rpc_server* rpc_server() { return rpc_server_.get(); }
 
     private:
       std::uint64_t session_id_;
@@ -50,7 +50,7 @@ namespace waos {
       session_status status_ = session_status::OPEN;
       std::string error_;
 
-      std::unique_ptr<serialization::socket_rpc_server> rpc_server_;
+      std::unique_ptr<serialization::compressed_socket_rpc_server> rpc_server_;
       std::string dir_path_;
       std::vector<std::shared_ptr<serialization::promise<void>>> inflight_;
 

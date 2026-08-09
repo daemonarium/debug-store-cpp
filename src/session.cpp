@@ -96,7 +96,7 @@ namespace waos {
     , labels_(std::move(labels))
     , dir_path_("sessions/" + std::to_string(session_id))
   {
-    rpc_server_ = std::make_unique<serialization::socket_rpc_server>(socket_id);
+    rpc_server_ = std::make_unique<serialization::compressed_socket_rpc_server>(socket_id);
     rpc_registration::register_session_api(rpc_server_.get(), false);
     register_handlers();
   }
