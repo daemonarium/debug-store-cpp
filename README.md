@@ -24,6 +24,8 @@ host filesystem (rootDir)
 | 1 FS | outbound RPC to ts-fs (host must bind before first `begin`) |
 | ≥2 | per-session: event messages + `debug_session` RPC |
 
+USER, session, and FS client RPC use **flat** wire (`flat_socket_rpc_*`). Recorder dumps land here as opaque snapshot / `io.bin` / registry blobs — see [recorder/DESIGN.md](../recorder/DESIGN.md).
+
 ## API
 
 **`debug_store.begin({ name, process_id, labels })`** → `{ session_id, store_process, store_socket }`
@@ -67,6 +69,8 @@ npm test --workspace=@wa-os/debug-store-tests
 ```
 
 Harness (`debug-store/ts-test`): Kernel + `createFsProcess` + `ModuleProcess(debug-store.wasm)` + recorder `LocalProcess`. Host binds `fs.0 ↔ store.1` before `begin`. Assertions use `node:fs` under a temp `rootDir`.
+
+Monorepo release gate: [`TESTING.md`](../TESTING.md) → `npm run gate`.
 
 ## Contract sources
 
