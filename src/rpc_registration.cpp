@@ -9,7 +9,7 @@ namespace waos {
     static waos::debug_store debug_store_api;
     static waos::debug_session debug_session_api;
 
-    void register_messages(serialization::compressed_socket_rpc_server* server, bool register_type) {
+    void register_messages(serialization::flat_socket_rpc_server* server, bool register_type) {
       waos::debug_snapshot_event snapEv;
       register_rpc(server, snapEv, register_type);
       waos::debug_io_event ioEv;
@@ -48,7 +48,7 @@ namespace waos {
       #endif
     }
 
-    void register_exceptions(serialization::compressed_socket_rpc_server* server, bool register_type) {
+    void register_exceptions(serialization::flat_socket_rpc_server* server, bool register_type) {
       waos::debug_error e1;
       register_exception(server, e1, register_type);
       waos::debug_invalid_argument e2;
@@ -63,7 +63,7 @@ namespace waos {
       register_exception(server, runtimeEx, register_type);
     }
 
-    void register_user_api(serialization::compressed_socket_rpc_server* server, bool register_type) {
+    void register_user_api(serialization::flat_socket_rpc_server* server, bool register_type) {
       if(server != nullptr) server->register_basic_types();
       waos::begin_session_request beginReq;
       register_rpc(server, beginReq, register_type);
@@ -73,7 +73,7 @@ namespace waos {
       register_exceptions(server, register_type);
     }
 
-    void register_session_api(serialization::compressed_socket_rpc_server* server, bool register_type) {
+    void register_session_api(serialization::flat_socket_rpc_server* server, bool register_type) {
       if(server != nullptr) server->register_basic_types();
       register_rpc(server, debug_session_api, register_type);
       register_messages(server, register_type);
