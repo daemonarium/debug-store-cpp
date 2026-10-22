@@ -1,78 +1,67 @@
-# debug-store (WASM)
+# debug-store
 
-C++ WASM module that records debug sessions (snapshots, I/O, logs, spans, metrics) and persists them through **ts-fs** over sockets. Host logic stays in `ts-fs`; this module is portable across runners. A native per-runner implementation can replace the WASM binary later without changing the RPC contract.
+A WebAssembly module that stores one debug session. The host binds
+socket 1 to the filesystem RPC. This module does not open the disk,
+and it is not part of the kernel.
 
-## Architecture
+This repository is `daemonarium/debug-store-cpp`. The artifact is
+`debug-store.wasm`. It is not an npm package.
 
-```
-Recorder (LocalProcess / shield)
-    │  RPC begin on USER=0
-    │  bind → session socket ≥2
-    │  messages + debug_session RPC
-    ▼
-debug-store.wasm
-    │  FS client on socket 1
-    ▼
-ts-fs LocalProcess
-    ▼
-host filesystem (rootDir)
-```
+## Why it is a separate module
 
-| Socket | Role |
-|--------|------|
-| 0 USER | inbound `debug_store.begin` |
-| 1 FS | outbound RPC to ts-fs (host must bind before first `begin`) |
-| ≥2 | per-session: event messages + `debug_session` RPC |
+The kernel stays off the host disk. `@daemonarium/fs` is the Node
+sink for that reason. This module is the portable writer: socket 1
+speaks that same RPC, so a later browser sink can replace the Node
+host without a new module.
 
-USER, session, and FS client RPC use **flat** wire (`flat_socket_rpc_*`). Recorder dumps land here as opaque snapshot / `io.bin` / registry blobs — see [recorder/DESIGN.md](../recorder/DESIGN.md).
-
-## API
-
-**`debug_store.begin({ name, process_id, labels })`** → `{ session_id, store_process, store_socket }`
-
-Recorder opens a local socket and **binds itself** to `store_socket` (no `writer_*` in the result).
-
-On the session socket:
-
-- Messages (+ trailing payload): `debug_snapshot_event`, `debug_io_event`, `debug_logs_event`, `debug_spans_event`, `debug_metrics_event`, `debug_bindings_event`, `debug_registry_event`, `debug_code_event`
-- RPC `debug_session`: `set_labels`, `sync`, `seal`, `fail`
-
-One writer; no read/tooling API; backpressure = sockets. Labels are `map<string,string>`. Log/span/metric payloads are opaque bytes. Topology: bindings payload → `bindings.bin`; registry event `{ process_id, socket_id }` + payload → `registry.<pid>.<sock>.bin`; code event → `code.wasm` (truncate overwrite). Session/snap side-cars are typed binary (`meta.bin`, `snap.<uid>.meta.bin`).
-
-## On-disk layout (under ts-fs `rootDir`)
-
-```
-sessions/<session_id>/meta.bin
-sessions/<session_id>/snap.<uid>.bin
-sessions/<session_id>/snap.<uid>.meta.bin
-sessions/<session_id>/io.bin|logs.bin|spans.bin|metrics.bin
-sessions/<session_id>/bindings.bin
-sessions/<session_id>/registry.<pid>.<sock>.bin
-sessions/<session_id>/code.wasm
-```
+`kernel-shield` and `recorder` are other repositories. Recording
+does not move into the kernel.
 
 ## Build
 
-From the repo root with the emscripten toolchain (same as `kernel-shield`):
+Stock Clang cannot compile this module. Build the
+[reflection-toolchain](https://github.com/daemonarium/reflection-toolchain)
+sysroot and point `P2996_COMPILER_SYSROOT` at it.
 
-```bash
-cmake -S . -B cmake-build-emscripten -DWASM=ON
-cmake --build cmake-build-emscripten --target debug-store
-# → cmake-build-emscripten/debug-store.wasm
+This module compiles sources from
+[rpc-cpp](https://github.com/daemonarium/rpc-cpp) `v0.1.0`:
+
+```
+git submodule add https://github.com/daemonarium/rpc-cpp.git extern/rpc-cpp
+cd extern/rpc-cpp && git checkout v0.1.0
 ```
 
-## Tests
-
-```bash
-npm install
-npm test --workspace=@wa-os/debug-store-tests
+```
+cmake -B build-web -S . \
+  -DCMAKE_TOOLCHAIN_FILE=$P2996_COMPILER_SYSROOT/toolchain/emscripten-p2996-toolchain.cmake \
+  -DWASM=ON
+cmake --build build-web --target debug-store
 ```
 
-Harness (`debug-store/ts-test`): Kernel + `createFsProcess` + `ModuleProcess(debug-store.wasm)` + recorder `LocalProcess`. Host binds `fs.0 ↔ store.1` before `begin`. Assertions use `node:fs` under a temp `rootDir`.
+`build-web/debug-store.wasm` exports `_rpc_description`, `_start`,
+`_malloc`, `_waos_socket_data`, and `_waos_socket_output_drain`.
 
-Monorepo release gate: [`TESTING.md`](../TESTING.md) → `npm run gate`.
+## How a host runs it
 
-## Contract sources
+`@daemonarium/kernel` loads the wasm bytes. `@daemonarium/fs` owns
+`rootDir`. Bind store socket 1 to the fs socket before the first
+`begin`. A recorder then calls `debug_store.begin` on socket 0 and
+binds itself to the session socket the result names.
 
-- Types: [`cpp-rpc/src/examples/structures/debug_store.hpp`](../cpp-rpc/src/examples/structures/debug_store.hpp)
-- Codegen stub module: [`cpp-rpc/src/examples/modules/debug_store.cpp`](../cpp-rpc/src/examples/modules/debug_store.cpp)
+See [docs/examples.md](docs/examples.md).
+
+## Sockets
+
+| Socket | Role |
+|--------|------|
+| 0 | User API. `debug_store.begin` arrives here. |
+| 1 | Filesystem RPC. The host binds this before `begin`. |
+| 2 and up | One socket per session. |
+
+The on-disk layout, message names, and session methods are in
+[docs/architecture.md](docs/architecture.md).
+
+## License
+
+MIT. Upstream notices are in `NOTICE`. Conduct is in
+`CODE_OF_CONDUCT.md`.

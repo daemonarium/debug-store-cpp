@@ -4,13 +4,14 @@ import { fileURLToPath } from 'node:url'
 import os from 'node:os'
 import fsp from 'node:fs/promises'
 
-import { Kernel, ModuleProcess, LocalProcess, Direction } from '@wa-os/ts-kernel'
+import { Kernel, ModuleProcess, LocalProcess, Direction } from '@daemonarium/kernel'
 import {
   SocketRpcClient,
   CodecRegistry,
   registerDynamicCodecs,
   deserializeTypeRegistry,
   deserializeValueByType,
+  serializeValueByType,
   deserializeTypedJson,
   ensureRpcCodecs,
   LocalCircularBuffer,
@@ -19,9 +20,8 @@ import {
   type TypeRegistry,
   type SocketOptions,
   type LocalSocket,
-} from '@wa-os/ts-rpc'
-import { serializeValueByType } from '@wa-os/ts-rpc/src/valueSerialization.js'
-import { createFsProcess, type FsProcessHandle } from '@wa-os/ts-fs'
+} from '@daemonarium/rpc'
+import { createFsProcess, type FsProcessHandle } from '@daemonarium/fs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -110,7 +110,7 @@ export async function setupTestEnvironment(rootDir: string): Promise<TestContext
     socketOptions: SOCKET_OPTS,
   })
 
-  const wasmPath = join(__dirname, '../../../cmake-build-emscripten/debug-store.wasm')
+  const wasmPath = join(__dirname, '../../build-web/debug-store.wasm')
   const wasmCode = await readFile(wasmPath)
 
   const storeProcessId = 1

@@ -1,7 +1,7 @@
 import { expect } from 'chai'
 import fsp from 'node:fs/promises'
 import { join } from 'node:path'
-import { RpcException } from '@wa-os/ts-rpc'
+import { RpcException } from '@daemonarium/rpc'
 import {
   openSessionChannel,
   setupTestEnvironment,
