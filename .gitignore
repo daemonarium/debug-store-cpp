@@ -2,4 +2,5 @@ build/
 build-web/
 node_modules
 ts-test/node_modules
+ts-test/dist
 extern/
